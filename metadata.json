@@ -1,0 +1,8 @@
+{
+  "name": "Sanelow Music Group Support",
+  "description": "Official Contact Us & Support Center with integrated Customer Ticket Tracking System for Sanelow Music Group merchandise, tour gear, and artist releases.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

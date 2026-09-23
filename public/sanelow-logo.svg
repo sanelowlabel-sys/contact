@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
+  <path d="M45 140C45 131.7 51.7 125 60 125H170C178.3 125 185 131.7 185 140V175H440C448.3 175 455 181.7 455 190V360C455 368.3 448.3 375 440 375H60C51.7 375 45 368.3 45 360V140Z" fill="#BD1E2D"/>
+  <rect x="63" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="119" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="175" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="231" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="287" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="343" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <rect x="399" y="191" width="41" height="165" rx="3" fill="#FFFFFF"/>
+  <path d="M104 180H119V280C119 285.5 114.5 290 109 290H114C108.5 290 104 285.5 104 280V180Z" fill="#BD1E2D"/>
+  <path d="M160 180H175V280C175 285.5 170.5 290 165 290H170C164.5 290 160 285.5 160 280V180Z" fill="#BD1E2D"/>
+  <path d="M272 180H287V280C287 285.5 282.5 290 277 290H282C276.5 290 272 285.5 272 280V180Z" fill="#BD1E2D"/>
+  <path d="M328 180H343V280C343 285.5 338.5 290 333 290H338C332.5 290 328 285.5 328 280V180Z" fill="#BD1E2D"/>
+  <path d="M384 180H399V280C399 285.5 394.5 290 389 290H394C388.5 290 384 285.5 384 280V180Z" fill="#BD1E2D"/>
+</svg>
