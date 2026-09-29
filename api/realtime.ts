@@ -1,4 +1,4 @@
-// Vercel Serverless Function: /api/realtime
+// API Route: /api/realtime
 // Triggers stateless real-time fanout across Pusher Channels or Supabase Realtime
 
 export default async function handler(req: any, res: any) {

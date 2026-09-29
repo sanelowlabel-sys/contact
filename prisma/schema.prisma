@@ -1,5 +1,5 @@
 // Prisma Schema for Sanelow Music Group Support
-// Production-ready PostgreSQL schema for Vercel deployment with Supabase/Neon
+// Production-ready PostgreSQL schema with Supabase/Neon
 
 datasource db {
   provider  = "postgresql"

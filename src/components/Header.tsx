@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { InAppNotification, UserProfile, UserRole } from '../types';
-import { Ticket, User, LifeBuoy, ArrowUpRight, Zap, ShieldCheck } from 'lucide-react';
+import { Ticket, User, LifeBuoy, ArrowUpRight, ShieldCheck } from 'lucide-react';
 import { SanelowLogo } from './SanelowLogo';
 import { NotificationDropdown } from './NotificationDropdown';
 
@@ -15,7 +15,6 @@ interface HeaderProps {
   onClearAllNotifications: () => void;
   onSelectTicketFromNotification: (ticketId: string) => void;
   onOpenAuthModal: () => void;
-  onOpenVercelModal: () => void;
   onQuickSwitchRole: (role: UserRole) => void;
 }
 
@@ -30,7 +29,6 @@ export const Header: React.FC<HeaderProps> = ({
   onClearAllNotifications,
   onSelectTicketFromNotification,
   onOpenAuthModal,
-  onOpenVercelModal,
   onQuickSwitchRole,
 }) => {
   const getRoleBadge = (role: UserRole) => {
@@ -124,18 +122,8 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </nav>
 
-        {/* Zone 3: Actions, Vercel guide, Notifications, Auth */}
+        {/* Zone 3: Notifications & Auth */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Vercel & Serverless Specs button */}
-          <button
-            onClick={onOpenVercelModal}
-            className="cursor-pointer text-xs flex items-center gap-1.5 px-2.5 py-1.5 border border-neutral-200 hover:border-black text-neutral-700 hover:text-black transition-colors rounded-xs bg-neutral-50/60"
-            title="View Vercel & Serverless Architecture Specs"
-          >
-            <Zap className="w-3.5 h-3.5 text-neutral-900" />
-            <span className="hidden sm:inline font-mono font-medium text-[11px]">Vercel Deploy</span>
-          </button>
-
           {/* In-App Notification Center */}
           <NotificationDropdown
             notifications={notifications}

@@ -29,7 +29,6 @@ import { TicketDashboard } from './components/TicketDashboard';
 import { TicketThreadModal } from './components/TicketThreadModal';
 import { GuestLookupModal } from './components/GuestLookupModal';
 import { AuthModal } from './components/AuthModal';
-import { VercelSetupModal } from './components/VercelSetupModal';
 import { EmailPreviewModal } from './components/EmailPreviewModal';
 import { OrdersView } from './components/OrdersView';
 import { SkeletonLoader } from './components/SkeletonLoader';
@@ -45,7 +44,6 @@ import {
   Package,
   Sparkles,
   HelpCircle,
-  Zap,
   Mail,
 } from 'lucide-react';
 
@@ -63,7 +61,6 @@ export default function App() {
   const [prefillCategory, setPrefillCategory] = useState<TicketCategory | undefined>(undefined);
   const [isGuestLookupOpen, setIsGuestLookupOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
   const [isEmailPreviewOpen, setIsEmailPreviewOpen] = useState(false);
   const [emailPreviewTicket, setEmailPreviewTicket] = useState<Ticket | null>(null);
 
@@ -322,7 +319,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Header with Navigation, Notifications, Roles, and Vercel Specs */}
+      {/* Header with Navigation, Notifications, and Roles */}
       <Header
         currentTab={currentTab}
         onSelectTab={(tab) => {
@@ -337,7 +334,6 @@ export default function App() {
         onClearAllNotifications={handleClearAllNotifications}
         onSelectTicketFromNotification={handleSelectTicketFromNotification}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onOpenVercelModal={() => setIsVercelModalOpen(true)}
         onQuickSwitchRole={handleQuickSwitchRole}
       />
 
@@ -352,8 +348,6 @@ export default function App() {
                 <div className="flex items-center justify-center sm:justify-start gap-2 text-xs font-mono uppercase tracking-wider text-neutral-500 mb-2">
                   <SanelowLogo size={18} color="#DC2626" className="inline-block shrink-0" />
                   <span>Sanelow Music Group Operations</span>
-                  <span>·</span>
-                  <span className="text-red-600 font-semibold">Vercel Serverless Ready</span>
                 </div>
                 <h1 className="text-3xl sm:text-5xl font-extrabold text-black uppercase tracking-tight">
                   SANELOW SUPPORT CENTER
@@ -365,13 +359,6 @@ export default function App() {
 
               {/* Quick action buttons */}
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 shrink-0">
-                <button
-                  onClick={() => setIsVercelModalOpen(true)}
-                  className="cursor-pointer px-3.5 py-2 text-xs font-mono font-medium text-black bg-white border border-neutral-300 hover:border-black transition-colors flex items-center gap-1.5"
-                >
-                  <Zap className="w-3.5 h-3.5 text-neutral-900" />
-                  <span>Vercel Architecture</span>
-                </button>
                 <button
                   onClick={() => setIsGuestLookupOpen(true)}
                   className="cursor-pointer px-4 py-2 text-xs font-medium text-black bg-white border border-neutral-300 hover:border-black transition-colors flex items-center gap-1.5"
@@ -588,11 +575,6 @@ export default function App() {
         currentRole={user.role}
       />
 
-      {/* Vercel Architecture & Deployment Specs Modal */}
-      {isVercelModalOpen && (
-        <VercelSetupModal onClose={() => setIsVercelModalOpen(false)} />
-      )}
-
       {/* Email Notification & Template Preview Modal */}
       {isEmailPreviewOpen && emailPreviewTicket && (
         <EmailPreviewModal
@@ -669,13 +651,6 @@ export default function App() {
                 className="hover:text-red-600 cursor-pointer"
               >
                 Guest Lookup
-              </button>
-              <button
-                onClick={() => setIsVercelModalOpen(true)}
-                className="text-neutral-900 font-mono hover:text-red-600 cursor-pointer flex items-center gap-1"
-              >
-                <Zap className="w-3 h-3 text-red-600" />
-                <span>Vercel Deploy Guide</span>
               </button>
             </div>
           </div>

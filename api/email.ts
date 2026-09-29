@@ -1,4 +1,4 @@
-// Vercel Serverless Function: /api/email
+// API Route: /api/email
 // Dispatches automated HTML emails via Resend or SendGrid with graceful fallback
 
 export default async function handler(req: any, res: any) {
