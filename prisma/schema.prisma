@@ -1,0 +1,119 @@
+// Prisma Schema for Sanelow Music Group Support
+// Production-ready PostgreSQL schema for Vercel deployment with Supabase/Neon
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  CUSTOMER
+  AGENT
+  ADMIN
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_USER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String
+  role          UserRole        @default(CUSTOMER)
+  avatar        String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  customerTickets Ticket[]      @relation("CustomerTickets")
+  assignedTickets Ticket[]      @relation("AgentTickets")
+  messages        TicketMessage[]
+  notifications   Notification[]
+
+  @@index([email])
+}
+
+model Ticket {
+  id                      String          @id // Formatted as '#TK-8492'
+  subject                 String
+  description             String          @db.Text
+  category                String
+  priority                TicketPriority  @default(MEDIUM)
+  status                  TicketStatus    @default(OPEN)
+  orderNumber             String?
+  emailNotificationEnabled Boolean        @default(true)
+
+  customerId              String
+  customer                User            @relation("CustomerTickets", fields: [customerId], references: [id])
+
+  assignedAgentId         String?
+  assignedAgent           User?           @relation("AgentTickets", fields: [assignedAgentId], references: [id])
+
+  messages                TicketMessage[]
+  attachments             TicketAttachment[]
+
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  @@index([status])
+  @@index([customerId])
+  @@index([assignedAgentId])
+  @@index([category])
+}
+
+model TicketMessage {
+  id          String             @id @default(cuid())
+  ticketId    String
+  ticket      Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User               @relation(fields: [senderId], references: [id])
+  content     String             @db.Text
+  isInternal  Boolean            @default(false)
+  createdAt   DateTime           @default(now())
+  attachments TicketAttachment[]
+
+  @@index([ticketId])
+}
+
+model TicketAttachment {
+  id        String         @id @default(cuid())
+  name      String
+  size      String
+  type      String
+  url       String
+  ticketId  String
+  ticket    Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId String?
+  message   TicketMessage? @relation(fields: [messageId], references: [id])
+  createdAt DateTime       @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String
+  title     String
+  message   String
+  type      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}

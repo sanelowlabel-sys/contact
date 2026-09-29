@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Ticket,
   TicketCategory,
@@ -6,12 +6,21 @@ import {
   TicketStatus,
   TicketAttachment,
   UserProfile,
+  UserRole,
+  InAppNotification,
+  EmailLog,
+  AgentInfo,
 } from './types';
 import {
   INITIAL_USER,
   INITIAL_TICKETS,
+  INITIAL_NOTIFICATIONS,
+  DEMO_PROFILES,
+  AVAILABLE_AGENTS,
   SUPPORT_AVATAR,
 } from './data/mockData';
+import { emailService } from './services/emailService';
+import { realtimeManager } from './services/realtimeService';
 import { Header } from './components/Header';
 import { ContactCards } from './components/ContactCards';
 import { FaqSection } from './components/FaqSection';
@@ -19,6 +28,9 @@ import { CreateTicketForm } from './components/CreateTicketForm';
 import { TicketDashboard } from './components/TicketDashboard';
 import { TicketThreadModal } from './components/TicketThreadModal';
 import { GuestLookupModal } from './components/GuestLookupModal';
+import { AuthModal } from './components/AuthModal';
+import { VercelSetupModal } from './components/VercelSetupModal';
+import { EmailPreviewModal } from './components/EmailPreviewModal';
 import { OrdersView } from './components/OrdersView';
 import { SkeletonLoader } from './components/SkeletonLoader';
 import { SanelowLogo } from './components/SanelowLogo';
@@ -33,6 +45,8 @@ import {
   Package,
   Sparkles,
   HelpCircle,
+  Zap,
+  Mail,
 } from 'lucide-react';
 
 export default function App() {
@@ -41,15 +55,19 @@ export default function App() {
   const [dashboardSubTab, setDashboardSubTab] = useState<'tickets' | 'orders'>('tickets');
   const [user, setUser] = useState<UserProfile>(INITIAL_USER);
   const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+  const [notifications, setNotifications] = useState<InAppNotification[]>(INITIAL_NOTIFICATIONS);
+  const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
 
-  // Active Ticket Modal
+  // Modals state
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [prefillCategory, setPrefillCategory] = useState<TicketCategory | undefined>(undefined);
-
-  // Guest lookup modal
   const [isGuestLookupOpen, setIsGuestLookupOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
+  const [isEmailPreviewOpen, setIsEmailPreviewOpen] = useState(false);
+  const [emailPreviewTicket, setEmailPreviewTicket] = useState<Ticket | null>(null);
 
-  // Loading simulation state for list refresh
+  // Loading simulation state
   const [isLoadingTickets, setIsLoadingTickets] = useState(false);
 
   // Banner toast
@@ -60,27 +78,70 @@ export default function App() {
     setTimeout(() => setBannerNotice(null), 3500);
   };
 
-  // Toggle user between Authenticated (Jordan Mercer) and Guest
-  const handleToggleUserMode = () => {
-    if (user.isGuest) {
-      setUser(INITIAL_USER);
-      showNotice('Switched to Authenticated Account: Jordan Mercer');
+  // Subscribe to email service logs
+  useEffect(() => {
+    const unsubscribe = emailService.subscribe((logs) => {
+      setEmailLogs(logs);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Quick switch role
+  const handleQuickSwitchRole = (role: UserRole) => {
+    const profile = DEMO_PROFILES[role];
+    if (profile) {
+      setUser(profile);
+      showNotice(`Active role: ${role.toUpperCase()} (${profile.name})`);
+    }
+  };
+
+  // Notification actions
+  const handleMarkNotificationAsRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+  };
+
+  const handleMarkAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    showNotice('All in-app alerts marked as read.');
+  };
+
+  const handleClearAllNotifications = () => {
+    setNotifications([]);
+    showNotice('Notifications cleared.');
+  };
+
+  const handleSelectTicketFromNotification = (ticketId: string) => {
+    const found = tickets.find((t) => t.id === ticketId);
+    if (found) {
+      setActiveTicketId(ticketId);
     } else {
-      setUser({
-        id: 'guest_session',
-        name: 'Guest Customer',
-        email: '',
-        isGuest: true,
-        orders: [],
-      });
-      showNotice('Switched to Guest Mode. Tickets will require email verification.');
+      showNotice(`Ticket ${ticketId} not found in current queue.`);
     }
   };
 
   // Create ticket handler
   const handleCreateTicket = async (newTicket: Ticket) => {
     setTickets((prev) => [newTicket, ...prev]);
-    showNotice(`Ticket ${newTicket.id} logged successfully!`);
+
+    // Dispatch automated confirmation email
+    await emailService.sendTicketConfirmation(newTicket);
+
+    // Push in-app notification
+    const newNotif: InAppNotification = {
+      id: `notif_${Date.now()}`,
+      ticketId: newTicket.id,
+      ticketSubject: newTicket.subject,
+      title: `Ticket Logged: ${newTicket.id}`,
+      message: `Confirmation email sent to ${newTicket.customerEmail}. Our team has received your inquiry.`,
+      type: 'created',
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+
+    showNotice(`Ticket ${newTicket.id} logged & confirmation email dispatched!`);
   };
 
   // Open ticket thread
@@ -94,84 +155,137 @@ export default function App() {
   };
 
   // Send message in thread
-  const handleSendMessage = (ticketId: string, content: string, attachments: TicketAttachment[]) => {
+  const handleSendMessage = async (
+    ticketId: string,
+    content: string,
+    attachments: TicketAttachment[],
+    isInternal: boolean = false
+  ) => {
+    let sentMessage: any = null;
+
     setTickets((prev) =>
       prev.map((t) => {
         if (t.id === ticketId) {
+          const isStaffSender = user.role === 'agent' || user.role === 'admin';
           const newMsg = {
             id: `msg_${Date.now()}`,
             senderId: user.isGuest ? 'guest' : user.id,
             senderName: user.isGuest ? t.customerName : user.name,
-            senderRole: 'customer' as const,
+            senderRole: user.role === 'customer' ? ('customer' as const) : ('agent' as const),
+            avatar: user.avatar,
             content,
             attachments,
+            isInternal,
             createdAt: new Date().toISOString(),
           };
+          sentMessage = newMsg;
+
+          // Determine next status:
+          // If customer replies, status becomes 'in_progress' or 'open'
+          // If staff replies to customer, status becomes 'pending_user'
+          let updatedStatus = t.status;
+          if (!isInternal) {
+            if (isStaffSender && t.status !== 'resolved' && t.status !== 'closed') {
+              updatedStatus = 'pending_user';
+            } else if (!isStaffSender && (t.status === 'pending_user' || t.status === 'open')) {
+              updatedStatus = 'in_progress';
+            }
+          }
+
           return {
             ...t,
             messages: [...t.messages, newMsg],
-            status: t.status === 'awaiting_reply' ? 'in_progress' : t.status,
+            status: updatedStatus,
             updatedAt: new Date().toISOString(),
           };
         }
         return t;
       })
     );
+
+    // If message is public, broadcast real-time event and trigger email
+    const currentTicket = tickets.find((t) => t.id === ticketId);
+    if (currentTicket && sentMessage && !isInternal) {
+      realtimeManager.publish(`ticket-${ticketId}`, 'new_message', sentMessage);
+      await emailService.sendNewReplyNotification(currentTicket, sentMessage);
+
+      // In-app alert
+      const alertNotif: InAppNotification = {
+        id: `notif_${Date.now()}`,
+        ticketId: currentTicket.id,
+        ticketSubject: currentTicket.subject,
+        title: `New message on ${currentTicket.id}`,
+        message: `${sentMessage.senderName}: "${content.slice(0, 75)}${content.length > 75 ? '...' : ''}"`,
+        type: 'reply',
+        read: false,
+        createdAt: new Date().toISOString(),
+        senderName: sentMessage.senderName,
+      };
+      setNotifications((prev) => [alertNotif, ...prev]);
+    }
   };
 
-  // Update status (e.g. resolve / reopen)
-  const handleUpdateStatus = (ticketId: string, status: TicketStatus) => {
-    setTickets((prev) =>
-      prev.map((t) => (t.id === ticketId ? { ...t, status, updatedAt: new Date().toISOString() } : t))
-    );
-  };
+  // Update status (e.g. resolve / reopen / closed)
+  const handleUpdateStatus = async (ticketId: string, status: TicketStatus) => {
+    let affectedTicket: Ticket | undefined;
 
-  // Toggle email notification
-  const handleToggleEmailNotifications = (ticketId: string) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.id === ticketId
-          ? {
-              ...t,
-              emailNotificationEnabled: !t.emailNotificationEnabled,
-            }
-          : t
-      )
-    );
-  };
-
-  // Staff reply simulator for real-time demonstration
-  const handleSimulateStaffReply = (ticketId: string) => {
     setTickets((prev) =>
       prev.map((t) => {
         if (t.id === ticketId) {
-          const staffReplies = [
-            'Hello! Our fulfillment warehouse supervisor just reviewed the batch. A replacement unit has been packed with priority shipping. Your replacement tracking label is generated.',
-            'Hi! We have processed your size exchange request. The prepaid return label has been emailed to your address. Once scanned by the carrier, the replacement ships immediately.',
-            'Thanks for following up! We reached out to our freight liaison; the customs hold at the sorting depot was cleared this morning, and delivery is projected in 48 hours.',
-          ];
-          const randomReply = staffReplies[Math.floor(Math.random() * staffReplies.length)];
-
-          const staffMsg = {
-            id: `msg_staff_${Date.now()}`,
-            senderId: 'staff_alex',
-            senderName: 'Alex Vance',
-            senderRole: 'staff' as const,
-            avatar: SUPPORT_AVATAR,
-            content: randomReply,
-            createdAt: new Date().toISOString(),
-          };
-
-          return {
-            ...t,
-            messages: [...t.messages, staffMsg],
-            status: 'awaiting_reply' as const,
-            updatedAt: new Date().toISOString(),
-          };
+          affectedTicket = { ...t, status, updatedAt: new Date().toISOString() };
+          return affectedTicket;
         }
         return t;
       })
     );
+
+    if (affectedTicket) {
+      realtimeManager.publish(`ticket-${ticketId}`, 'status_change', { status });
+      await emailService.sendStatusChangeNotification(affectedTicket, status);
+
+      const statusNotif: InAppNotification = {
+        id: `notif_${Date.now()}`,
+        ticketId: affectedTicket.id,
+        ticketSubject: affectedTicket.subject,
+        title: `Status Changed: ${status.toUpperCase()}`,
+        message: `Ticket ${affectedTicket.id} was updated to ${status}. Notification email sent to ${affectedTicket.customerEmail}.`,
+        type: 'status_change',
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+      setNotifications((prev) => [statusNotif, ...prev]);
+    }
+  };
+
+  // Update priority
+  const handleUpdatePriority = (ticketId: string, priority: TicketPriority) => {
+    setTickets((prev) =>
+      prev.map((t) => (t.id === ticketId ? { ...t, priority, updatedAt: new Date().toISOString() } : t))
+    );
+    showNotice(`Priority updated to ${priority.toUpperCase()}`);
+  };
+
+  // Assign agent
+  const handleAssignAgent = (ticketId: string, agent: AgentInfo | null) => {
+    setTickets((prev) =>
+      prev.map((t) =>
+        t.id === ticketId ? { ...t, assignedAgent: agent, updatedAt: new Date().toISOString() } : t
+      )
+    );
+
+    if (agent) {
+      const assignNotif: InAppNotification = {
+        id: `notif_${Date.now()}`,
+        ticketId,
+        ticketSubject: tickets.find((t) => t.id === ticketId)?.subject || '',
+        title: `Ticket Assigned to ${agent.name}`,
+        message: `${agent.name} (${agent.title}) has taken ownership of this ticket.`,
+        type: 'assignment',
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+      setNotifications((prev) => [assignNotif, ...prev]);
+    }
   };
 
   // Refresh ticket list with skeleton loader
@@ -179,14 +293,20 @@ export default function App() {
     setIsLoadingTickets(true);
     setTimeout(() => {
       setIsLoadingTickets(false);
-      showNotice('Ticket queue synchronized with server.');
-    }, 1100);
+      showNotice('Ticket queue synchronized with serverless data layer.');
+    }, 900);
   };
 
   // Open ticket form with prefilled order
   const handleOpenTicketForOrder = (orderId: string) => {
     setCurrentTab('create');
     setPrefillCategory('Damaged / Misprinted Item');
+  };
+
+  // Open Email Preview for a ticket
+  const handleOpenEmailPreviewForTicket = (ticket: Ticket) => {
+    setEmailPreviewTicket(ticket);
+    setIsEmailPreviewOpen(true);
   };
 
   // Active ticket object
@@ -202,7 +322,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Header with 3-Zone top bar contract */}
+      {/* Header with Navigation, Notifications, Roles, and Vercel Specs */}
       <Header
         currentTab={currentTab}
         onSelectTab={(tab) => {
@@ -210,15 +330,20 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         user={user}
-        onToggleUserMode={handleToggleUserMode}
-        ticketCount={tickets.filter((t) => t.status !== 'resolved').length}
+        ticketCount={tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length}
+        notifications={notifications}
+        onMarkNotificationAsRead={handleMarkNotificationAsRead}
+        onMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
+        onClearAllNotifications={handleClearAllNotifications}
+        onSelectTicketFromNotification={handleSelectTicketFromNotification}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenVercelModal={() => setIsVercelModalOpen(true)}
+        onQuickSwitchRole={handleQuickSwitchRole}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* ======================================================== */}
-        {/* VIEW 1: CONTACT & HELP CENTER (Default) */}
-        {/* ======================================================== */}
+        {/* VIEW 1: CONTACT & HELP CENTER */}
         {currentTab === 'contact' && (
           <div>
             {/* Page Header / Hero Section */}
@@ -228,7 +353,7 @@ export default function App() {
                   <SanelowLogo size={18} color="#DC2626" className="inline-block shrink-0" />
                   <span>Sanelow Music Group Operations</span>
                   <span>·</span>
-                  <span className="text-red-600 font-semibold">Priority Helpdesk SLA Active</span>
+                  <span className="text-red-600 font-semibold">Vercel Serverless Ready</span>
                 </div>
                 <h1 className="text-3xl sm:text-5xl font-extrabold text-black uppercase tracking-tight">
                   SANELOW SUPPORT CENTER
@@ -241,8 +366,15 @@ export default function App() {
               {/* Quick action buttons */}
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 shrink-0">
                 <button
+                  onClick={() => setIsVercelModalOpen(true)}
+                  className="cursor-pointer px-3.5 py-2 text-xs font-mono font-medium text-black bg-white border border-neutral-300 hover:border-black transition-colors flex items-center gap-1.5"
+                >
+                  <Zap className="w-3.5 h-3.5 text-neutral-900" />
+                  <span>Vercel Architecture</span>
+                </button>
+                <button
                   onClick={() => setIsGuestLookupOpen(true)}
-                  className="cursor-pointer px-4 py-2 text-xs font-medium text-black bg-white border border-neutral-300 hover:border-neutral-500 transition-colors flex items-center gap-1.5"
+                  className="cursor-pointer px-4 py-2 text-xs font-medium text-black bg-white border border-neutral-300 hover:border-black transition-colors flex items-center gap-1.5"
                 >
                   <Search className="w-3.5 h-3.5 text-neutral-500" />
                   <span>Track Existing Ticket</span>
@@ -269,21 +401,21 @@ export default function App() {
               onNavigateToFAQ={() => setCurrentTab('faq')}
             />
 
-            {/* User Active Tickets Quick Glance (if tickets exist) */}
+            {/* User Active Tickets Quick Glance */}
             {tickets.length > 0 && (
               <div className="mb-12 border border-neutral-200 bg-neutral-50/60 p-5 sm:p-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-neutral-200">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-                      Your Active Ticket Activity ({tickets.filter((t) => t.status !== 'resolved').length} open)
+                      Active Ticket Activity ({tickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length} open)
                     </h2>
                   </div>
                   <button
                     onClick={() => setCurrentTab('dashboard')}
                     className="cursor-pointer text-xs font-semibold text-red-600 hover:text-red-700 flex items-center gap-1"
                   >
-                    <span>Go to Full Ticket Dashboard</span>
+                    <span>Go to Full Ticket Queue</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -333,19 +465,14 @@ export default function App() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* VIEW 2: SUBMIT TICKET FORM */}
-        {/* ======================================================== */}
         {currentTab === 'create' && (
           <div>
             <CreateTicketForm
               user={user}
               prefillCategory={prefillCategory}
               onSubmitTicket={handleCreateTicket}
-              onSwitchToAuth={() => {
-                setUser(INITIAL_USER);
-                showNotice('Logged in as Jordan Mercer');
-              }}
+              onSwitchToAuth={() => setIsAuthModalOpen(true)}
               onViewTicket={(ticketId) => {
                 setActiveTicketId(ticketId);
               }}
@@ -353,9 +480,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* VIEW 3: SUPPORT & TICKET DASHBOARD */}
-        {/* ======================================================== */}
         {currentTab === 'dashboard' && (
           <div>
             {/* Account Tab Switcher */}
@@ -368,9 +493,9 @@ export default function App() {
                     : 'border-transparent text-neutral-500 hover:text-black'
                 }`}
               >
-                Support Tickets ({tickets.length})
+                {user.role === 'customer' ? 'My Support Tickets' : 'Operations Queue'} ({tickets.length})
               </button>
-              {!user.isGuest && (
+              {!user.isGuest && user.orders && user.orders.length > 0 && (
                 <button
                   onClick={() => setDashboardSubTab('orders')}
                   className={`cursor-pointer px-4 py-2.5 font-bold uppercase tracking-wider transition-colors border-b-2 ${
@@ -403,9 +528,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ======================================================== */}
         {/* VIEW 4: DEDICATED FAQ & SIZING GUIDE */}
-        {/* ======================================================== */}
         {currentTab === 'faq' && (
           <div>
             <div className="mb-8 border-b border-neutral-200 pb-6">
@@ -438,8 +561,9 @@ export default function App() {
           onClose={() => setActiveTicketId(null)}
           onSendMessage={handleSendMessage}
           onUpdateStatus={handleUpdateStatus}
-          onToggleEmailNotifications={handleToggleEmailNotifications}
-          onSimulateStaffReply={handleSimulateStaffReply}
+          onUpdatePriority={handleUpdatePriority}
+          onAssignAgent={handleAssignAgent}
+          onOpenEmailPreview={handleOpenEmailPreviewForTicket}
         />
       )}
 
@@ -452,6 +576,52 @@ export default function App() {
           setActiveTicketId(t.id);
         }}
       />
+
+      {/* Role-Based Authentication & Switcher Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLogin={(newUser) => {
+          setUser(newUser);
+          showNotice(`Logged in as ${newUser.name} (${newUser.role})`);
+        }}
+        currentRole={user.role}
+      />
+
+      {/* Vercel Architecture & Deployment Specs Modal */}
+      {isVercelModalOpen && (
+        <VercelSetupModal onClose={() => setIsVercelModalOpen(false)} />
+      )}
+
+      {/* Email Notification & Template Preview Modal */}
+      {isEmailPreviewOpen && emailPreviewTicket && (
+        <EmailPreviewModal
+          ticket={emailPreviewTicket}
+          emailLogs={emailLogs}
+          onClose={() => setIsEmailPreviewOpen(false)}
+          onSendTestEmail={async (tmpl) => {
+            if (tmpl === 'ticket_confirmation') {
+              await emailService.sendTicketConfirmation(emailPreviewTicket);
+            } else if (tmpl === 'new_reply') {
+              const lastMsg =
+                emailPreviewTicket.messages[emailPreviewTicket.messages.length - 1] || {
+                  id: 'demo',
+                  senderId: 'staff',
+                  senderName: 'Alex Vance',
+                  senderRole: 'agent',
+                  content: 'Test reply dispatch from preview inspector.',
+                  createdAt: new Date().toISOString(),
+                };
+              await emailService.sendNewReplyNotification(emailPreviewTicket, lastMsg);
+            } else if (tmpl === 'status_changed') {
+              await emailService.sendStatusChangeNotification(
+                emailPreviewTicket,
+                emailPreviewTicket.status
+              );
+            }
+          }}
+        />
+      )}
 
       {/* Strict Theme Footer */}
       <footer className="mt-auto border-t border-neutral-200 bg-white">
@@ -499,6 +669,13 @@ export default function App() {
                 className="hover:text-red-600 cursor-pointer"
               >
                 Guest Lookup
+              </button>
+              <button
+                onClick={() => setIsVercelModalOpen(true)}
+                className="text-neutral-900 font-mono hover:text-red-600 cursor-pointer flex items-center gap-1"
+              >
+                <Zap className="w-3 h-3 text-red-600" />
+                <span>Vercel Deploy Guide</span>
               </button>
             </div>
           </div>

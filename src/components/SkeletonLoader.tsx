@@ -3,14 +3,17 @@ import React from 'react';
 interface SkeletonLoaderProps {
   type?: 'table' | 'cards' | 'submission' | 'upload' | 'thread';
   rows?: number;
+  count?: number;
   label?: string;
 }
 
 export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
   type = 'table',
-  rows = 4,
+  rows,
+  count,
   label = 'Processing request...',
 }) => {
+  const effectiveRows = rows || count || 4;
   if (type === 'submission') {
     return (
       <div className="border border-neutral-200 bg-white p-6 space-y-5 animate-pulse">
@@ -89,7 +92,7 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
         <div className="h-4 w-32 bg-black rounded" />
         <div className="h-3 w-20 bg-red-600/30 rounded" />
       </div>
-      {Array.from({ length: rows }).map((_, i) => (
+      {Array.from({ length: effectiveRows }).map((_, i) => (
         <div key={i} className="p-4 flex items-center justify-between gap-4 animate-pulse">
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 rounded-full bg-red-600/60" />

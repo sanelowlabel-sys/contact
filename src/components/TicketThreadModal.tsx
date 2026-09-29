@@ -5,9 +5,12 @@ import {
   TicketAttachment,
   UserProfile,
   TicketStatus,
+  TicketPriority,
+  AgentInfo,
 } from '../types';
-import { SUPPORT_AVATAR, MERCH_SAMPLE_IMAGE } from '../data/mockData';
-import { SkeletonLoader } from './SkeletonLoader';
+import { AVAILABLE_AGENTS } from '../data/mockData';
+import { realtimeManager } from '../services/realtimeService';
+import { emailService } from '../services/emailService';
 import { SanelowLogo } from './SanelowLogo';
 import {
   X,
@@ -23,16 +26,27 @@ import {
   Sparkles,
   ExternalLink,
   MessageSquare,
+  Lock,
+  Mail,
+  UserCheck,
+  AlertTriangle,
+  ChevronDown,
 } from 'lucide-react';
 
 interface TicketThreadModalProps {
   ticket: Ticket;
   user: UserProfile;
   onClose: () => void;
-  onSendMessage: (ticketId: string, content: string, attachments: TicketAttachment[]) => void;
+  onSendMessage: (
+    ticketId: string,
+    content: string,
+    attachments: TicketAttachment[],
+    isInternal?: boolean
+  ) => void;
   onUpdateStatus: (ticketId: string, status: TicketStatus) => void;
-  onToggleEmailNotifications: (ticketId: string) => void;
-  onSimulateStaffReply: (ticketId: string) => void;
+  onUpdatePriority?: (ticketId: string, priority: TicketPriority) => void;
+  onAssignAgent?: (ticketId: string, agent: AgentInfo | null) => void;
+  onOpenEmailPreview: (ticket: Ticket) => void;
 }
 
 export const TicketThreadModal: React.FC<TicketThreadModalProps> = ({
@@ -41,15 +55,19 @@ export const TicketThreadModal: React.FC<TicketThreadModalProps> = ({
   onClose,
   onSendMessage,
   onUpdateStatus,
-  onToggleEmailNotifications,
-  onSimulateStaffReply,
+  onUpdatePriority,
+  onAssignAgent,
+  onOpenEmailPreview,
 }) => {
   const [replyContent, setReplyContent] = useState('');
   const [replyAttachments, setReplyAttachments] = useState<TicketAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [isSimulatingAgent, setIsSimulatingAgent] = useState(false);
+  const [isInternalNote, setIsInternalNote] = useState(false);
+  const [isAgentTyping, setIsAgentTyping] = useState(false);
+  const [typingAgentName, setTypingAgentName] = useState('Alex Vance');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const isStaff = user.role === 'agent' || user.role === 'admin';
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,21 +77,22 @@ export const TicketThreadModal: React.FC<TicketThreadModalProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [ticket.messages.length]);
+  }, [ticket.messages.length, isAgentTyping]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyContent.trim() && replyAttachments.length === 0) return;
 
-    onSendMessage(ticket.id, replyContent, replyAttachments);
+    onSendMessage(ticket.id, replyContent, replyAttachments, isStaff && isInternalNote);
     setReplyContent('');
     setReplyAttachments([]);
-    showToast('Reply dispatched to support desk.');
+    setIsInternalNote(false);
+    showToast(isInternalNote ? 'Internal staff note recorded.' : 'Message dispatched to thread.');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,477 +117,473 @@ export const TicketThreadModal: React.FC<TicketThreadModalProps> = ({
       setReplyAttachments((prev) => [...prev, ...newAtts]);
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    }, 800);
-  };
-
-  const handleAttachSample = () => {
-    setIsUploading(true);
-    setTimeout(() => {
-      setReplyAttachments((prev) => [
-        ...prev,
-        {
-          id: `att_sample_${Date.now()}`,
-          name: 'replacement_label_confirmation.jpg',
-          size: '1.8 MB',
-          type: 'image/jpeg',
-          url: MERCH_SAMPLE_IMAGE,
-          previewUrl: MERCH_SAMPLE_IMAGE,
-          uploadedAt: new Date().toISOString(),
-        },
-      ]);
-      setIsUploading(false);
     }, 600);
   };
 
-  const handleSimulateStaff = () => {
-    setIsSimulatingAgent(true);
-    setTimeout(() => {
-      onSimulateStaffReply(ticket.id);
-      setIsSimulatingAgent(false);
-      showToast('Support specialist Alex Vance replied to this ticket.');
-    }, 1200);
+  const handleRemoveAttachment = (attId: string) => {
+    setReplyAttachments((prev) => prev.filter((a) => a.id !== attId));
   };
 
-  const handleToggleResolve = () => {
-    if (ticket.status === 'resolved') {
-      onUpdateStatus(ticket.id, 'in_progress');
-      showToast('Ticket reopened and placed in active queue.');
-    } else {
-      onUpdateStatus(ticket.id, 'resolved');
-      showToast('Ticket marked as resolved.');
-    }
+  // Simulate real-time incoming response
+  const handleSimulateRealtimeAgentReply = () => {
+    const agent = ticket.assignedAgent || AVAILABLE_AGENTS[0];
+    setTypingAgentName(agent.name);
+    showToast(`Simulating live response from ${agent.name}...`);
+    realtimeManager.simulateAgentResponse(
+      ticket,
+      agent,
+      (typing) => setIsAgentTyping(typing),
+      (msg) => {
+        onSendMessage(ticket.id, msg.content, [], false);
+        // Automatically send email notification
+        emailService.sendNewReplyNotification(ticket, msg);
+        showToast(`Real-time reply received from ${agent.name}.`);
+      }
+    );
   };
 
-  // Status badge styling adhering strictly to requirement 1:
-  // "Accents: Vibrant Red (#DC2626) for active status badges (e.g., 'Open Ticket', 'Urgent'). Muted Grey for closed status indicators."
-  const renderStatusBadge = () => {
-    switch (ticket.status) {
-      case 'pending_agent':
-        return (
-          <span className="font-mono text-xs text-red-600 font-bold flex items-center gap-1.5 border border-red-200 bg-red-50/50 px-2.5 py-1">
-            <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-            Pending Agent
-          </span>
-        );
+  const statusLifecycleOrder: TicketStatus[] = [
+    'open',
+    'in_progress',
+    'pending_user',
+    'resolved',
+    'closed',
+  ];
+
+  const getStatusLabel = (st: TicketStatus) => {
+    switch (st) {
+      case 'open':
+        return 'Open';
       case 'in_progress':
-        return (
-          <span className="font-mono text-xs text-amber-700 font-bold flex items-center gap-1.5 border border-amber-200 bg-amber-50/50 px-2.5 py-1">
-            <span className="w-2 h-2 rounded-full bg-amber-500" />
-            In Progress
-          </span>
-        );
-      case 'awaiting_reply':
-        return (
-          <span className="font-mono text-xs text-red-600 font-bold flex items-center gap-1.5 border border-red-300 bg-red-50 px-2.5 py-1">
-            <span className="w-2 h-2 rounded-full bg-red-600" />
-            Awaiting Customer Reply
-          </span>
-        );
+        return 'In Progress';
+      case 'pending_user':
+        return 'Pending User';
       case 'resolved':
-        return (
-          <span className="font-mono text-xs text-neutral-500 font-medium flex items-center gap-1.5 border border-neutral-200 bg-neutral-100 px-2.5 py-1">
-            <CheckCircle2 className="w-3.5 h-3.5 text-neutral-500" />
-            Resolved
-          </span>
-        );
+        return 'Resolved';
+      case 'closed':
+        return 'Closed';
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs">
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div className="fixed top-5 right-5 z-60 bg-black text-white px-4 py-2.5 text-xs font-semibold shadow-lg border border-neutral-800 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <span className="w-2 h-2 rounded-full bg-red-600" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      <div className="bg-white border border-neutral-200 w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-6 overflow-y-auto backdrop-blur-xs">
+      <div className="bg-white w-full max-w-4xl max-h-[92vh] flex flex-col border border-neutral-200 shadow-2xl rounded-xs overflow-hidden">
         {/* Top Header */}
-        <div className="px-6 py-4 border-b border-neutral-200 flex items-center justify-between bg-white shrink-0">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <SanelowLogo size={24} color="#DC2626" className="shrink-0" />
-            <span className="font-mono font-bold text-black text-base">
-              {ticket.id}
-            </span>
-            <span className="text-neutral-300 hidden sm:inline">|</span>
-            <span className="text-sm font-semibold text-black truncate max-w-md">
-              {ticket.subject}
-            </span>
+        <div className="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between bg-black text-white shrink-0">
+          <div className="flex items-center gap-3">
+            <SanelowLogo size={30} color="#DC2626" />
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-red-500">{ticket.id}</span>
+                <span className="text-neutral-500">&bull;</span>
+                <span className="text-xs text-neutral-300 font-mono">{ticket.category}</span>
+                {ticket.orderNumber && (
+                  <span className="font-mono text-[10px] bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded">
+                    {ticket.orderNumber}
+                  </span>
+                )}
+              </div>
+              <h2 className="text-sm font-bold text-white truncate max-w-md mt-0.5">
+                {ticket.subject}
+              </h2>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Email Preview button */}
+            <button
+              onClick={() => onOpenEmailPreview(ticket)}
+              className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-mono rounded flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="Preview Resend / SendGrid HTML email for this ticket"
+            >
+              <Mail className="w-3.5 h-3.5 text-red-500" />
+              <span className="hidden sm:inline">Email Preview</span>
+            </button>
+
             <button
               onClick={onClose}
-              className="cursor-pointer p-1.5 text-neutral-400 hover:text-black border border-neutral-200 hover:border-neutral-300 transition-colors"
-              title="Close thread"
+              className="p-1.5 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Main Body: 2 Columns on Desktop */}
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          {/* Left / Main: Chat Thread */}
-          <div className="flex-1 flex flex-col bg-neutral-50 overflow-hidden">
-            {/* Thread Messages */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-              {/* Original Ticket Description Card */}
-              <div className="bg-white border border-neutral-200 p-4 sm:p-5">
-                <div className="flex items-center justify-between pb-3 mb-3 border-b border-neutral-100 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-black">{ticket.customerName}</span>
-                    <span className="text-neutral-400">opened this case</span>
-                  </div>
-                  <span className="font-mono text-neutral-400">
-                    {new Date(ticket.createdAt).toLocaleString()}
-                  </span>
-                </div>
-                <p className="text-sm text-neutral-800 leading-relaxed font-sans">
-                  {ticket.description}
-                </p>
+        {/* Lifecycle Status & Controls Bar */}
+        <div className="px-5 py-3 bg-neutral-50 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+          {/* Status Track */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+            <span className="font-mono text-[10px] uppercase text-neutral-500 font-semibold mr-1">
+              Lifecycle:
+            </span>
+            {statusLifecycleOrder.map((statusKey, index) => {
+              const isActive = ticket.status === statusKey;
+              const isPast =
+                statusLifecycleOrder.indexOf(ticket.status) > index && ticket.status !== 'closed';
 
-                {/* Attachments from initial report */}
-                {ticket.attachments && ticket.attachments.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-neutral-100">
-                    <span className="font-mono text-[11px] text-neutral-400 uppercase block mb-2">
-                      Original Attached Proof ({ticket.attachments.length}):
-                    </span>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {ticket.attachments.map((att) => (
-                        <div
-                          key={att.id}
-                          className="border border-neutral-200 p-2 bg-neutral-50 flex flex-col gap-1.5"
-                        >
-                          {att.url && (
-                            <img
-                              src={att.url}
-                              alt={att.name}
-                              className="w-full h-24 object-cover border border-neutral-200"
-                            />
-                          )}
-                          <div className="truncate">
-                            <p className="font-mono text-[11px] text-black font-semibold truncate">
-                              {att.name}
-                            </p>
-                            <p className="font-mono text-[10px] text-neutral-500">{att.size}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Message List */}
-              {ticket.messages
-                .filter((_, idx) => idx > 0) // Skip first if duplicate of initial description
-                .map((msg) => {
-                  const isStaff = msg.senderRole === 'staff';
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`flex gap-3 items-start ${
-                        isStaff ? 'justify-start' : 'justify-end'
-                      }`}
-                    >
-                      {isStaff && (
-                        <img
-                          src={msg.avatar || SUPPORT_AVATAR}
-                          alt={msg.senderName}
-                          className="w-9 h-9 rounded-full object-cover border border-neutral-300 shrink-0 mt-0.5"
-                        />
-                      )}
-
-                      <div
-                        className={`max-w-[85%] sm:max-w-[75%] p-4 border text-sm leading-relaxed ${
-                          isStaff
-                            ? 'bg-white border-neutral-200 text-black'
-                            : 'bg-white border-neutral-300 text-black ml-auto'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-4 pb-2 mb-2 border-b border-neutral-100 text-xs">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-black">{msg.senderName}</span>
-                            {isStaff ? (
-                              <span className="font-mono text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 font-semibold">
-                                STAFF
-                              </span>
-                            ) : (
-                              <span className="font-mono text-[10px] text-neutral-400">
-                                CUSTOMER
-                              </span>
-                            )}
-                          </div>
-                          <span className="font-mono text-[11px] text-neutral-400">
-                            {new Date(msg.createdAt).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </div>
-
-                        <p className="whitespace-pre-line text-neutral-800">{msg.content}</p>
-
-                        {/* Message Attachments */}
-                        {msg.attachments && msg.attachments.length > 0 && (
-                          <div className="mt-3 pt-2 border-t border-neutral-100 space-y-2">
-                            {msg.attachments.map((att) => (
-                              <div
-                                key={att.id}
-                                className="flex items-center gap-2 p-1.5 bg-neutral-50 border border-neutral-200 text-xs"
-                              >
-                                {att.url && (
-                                  <img
-                                    src={att.url}
-                                    alt={att.name}
-                                    className="w-8 h-8 object-cover border border-neutral-200"
-                                  />
-                                )}
-                                <div className="truncate">
-                                  <p className="font-mono text-xs text-black truncate">{att.name}</p>
-                                  <span className="font-mono text-[10px] text-neutral-500">
-                                    {att.size}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-              {/* Simulating Staff loader */}
-              {isSimulatingAgent && (
-                <div className="pt-2">
-                  <SkeletonLoader type="thread" />
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Reply Composer */}
-            <div className="p-4 bg-white border-t border-neutral-200">
-              {ticket.status === 'resolved' ? (
-                <div className="p-3 bg-neutral-100 border border-neutral-200 flex items-center justify-between text-xs">
-                  <span className="text-neutral-600">
-                    This ticket is currently marked as <strong>Resolved</strong>.
-                  </span>
-                  <button
-                    onClick={handleToggleResolve}
-                    className="cursor-pointer font-bold text-red-600 hover:text-red-700 flex items-center gap-1 underline"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reopen Ticket to Send Message</span>
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleSend} className="space-y-3">
-                  {/* File previews in reply box */}
-                  {replyAttachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pb-2">
-                      {replyAttachments.map((a) => (
-                        <div
-                          key={a.id}
-                          className="flex items-center gap-2 px-2 py-1 bg-neutral-100 border border-neutral-200 text-xs"
-                        >
-                          <span className="font-mono text-black truncate max-w-xs">{a.name}</span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setReplyAttachments((prev) => prev.filter((item) => item.id !== a.id))
-                            }
-                            className="text-neutral-400 hover:text-red-600 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="relative">
-                    <textarea
-                      rows={3}
-                      value={replyContent}
-                      onChange={(e) => setReplyContent(e.target.value)}
-                      placeholder="Type your reply to merchandise customer support..."
-                      className="w-full p-3 text-xs sm:text-sm border border-neutral-200 focus:border-red-600 focus:outline-none transition-colors text-black resize-none"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileUpload}
-                        className="hidden"
-                        multiple
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="cursor-pointer text-xs text-neutral-600 hover:text-black flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 hover:border-neutral-300 transition-colors"
-                      >
-                        <Paperclip className="w-3.5 h-3.5 text-neutral-500" />
-                        <span>Attach Photo</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleAttachSample}
-                        className="cursor-pointer text-xs text-red-600 hover:text-red-700 flex items-center gap-1 px-2.5 py-1.5 border border-red-100 hover:border-red-300 bg-red-50/50 transition-colors hidden sm:flex"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Sample Proof</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={!replyContent.trim() && replyAttachments.length === 0}
-                      className="cursor-pointer px-5 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Send Reply</span>
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
+              return (
+                <button
+                  key={statusKey}
+                  disabled={!isStaff && statusKey === 'closed'}
+                  onClick={() => {
+                    onUpdateStatus(ticket.id, statusKey);
+                    showToast(`Ticket status updated to ${getStatusLabel(statusKey)}`);
+                  }}
+                  className={`px-2.5 py-1 text-xs font-mono font-semibold rounded-xs transition-colors flex items-center gap-1 ${
+                    isActive
+                      ? statusKey === 'resolved'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-red-600 text-white shadow-xs'
+                      : isPast
+                      ? 'bg-neutral-200 text-neutral-800 hover:bg-neutral-300'
+                      : 'bg-white border border-neutral-200 text-neutral-600 hover:border-black'
+                  } ${!isStaff && statusKey === 'closed' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  <span>{getStatusLabel(statusKey)}</span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Right Column: Ticket Metadata & Management Sidebar */}
-          <div className="w-full md:w-72 bg-white border-t md:border-t-0 md:border-l border-neutral-200 p-5 flex flex-col justify-between shrink-0 overflow-y-auto">
-            <div className="space-y-5">
-              <div>
-                <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                  Ticket Status
-                </span>
-                {renderStatusBadge()}
-              </div>
+          {/* Quick Staff Controls: Agent Assignment & Priority */}
+          <div className="flex items-center gap-2">
+            {isStaff && (
+              <>
+                {/* Agent Assignment */}
+                <div className="flex items-center gap-1 font-mono text-xs">
+                  <span className="text-[10px] text-neutral-500 uppercase">Agent:</span>
+                  <select
+                    value={ticket.assignedAgent?.id || 'unassigned'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'unassigned') {
+                        onAssignAgent?.(ticket.id, null);
+                        showToast('Ticket marked unassigned');
+                      } else {
+                        const found = AVAILABLE_AGENTS.find((a) => a.id === val);
+                        if (found) {
+                          onAssignAgent?.(ticket.id, found);
+                          showToast(`Assigned ticket to ${found.name}`);
+                        }
+                      }
+                    }}
+                    className="px-2 py-1 bg-white border border-neutral-300 text-xs font-mono rounded-xs focus:border-red-600 focus:outline-none"
+                  >
+                    <option value="unassigned">Unassigned</option>
+                    {AVAILABLE_AGENTS.map((ag) => (
+                      <option key={ag.id} value={ag.id}>
+                        {ag.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
+                {/* Priority Selector */}
+                <div className="flex items-center gap-1 font-mono text-xs">
+                  <span className="text-[10px] text-neutral-500 uppercase">Priority:</span>
+                  <select
+                    value={ticket.priority}
+                    onChange={(e) => {
+                      onUpdatePriority?.(ticket.id, e.target.value as TicketPriority);
+                      showToast(`Priority set to ${e.target.value.toUpperCase()}`);
+                    }}
+                    className="px-2 py-1 bg-white border border-neutral-300 text-xs font-mono rounded-xs focus:border-red-600 focus:outline-none font-bold"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {/* Customer Quick Resolve / Reopen Button */}
+            {!isStaff && (
               <div>
-                <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                  Priority
+                {ticket.status === 'resolved' || ticket.status === 'closed' ? (
+                  <button
+                    onClick={() => {
+                      onUpdateStatus(ticket.id, 'open');
+                      showToast('Ticket reopened');
+                    }}
+                    className="px-3 py-1 bg-white border border-neutral-300 hover:border-black text-black font-semibold rounded-xs cursor-pointer flex items-center gap-1 font-mono text-xs"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reopen Ticket</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      onUpdateStatus(ticket.id, 'resolved');
+                      showToast('Ticket marked as resolved');
+                    }}
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xs cursor-pointer flex items-center gap-1 font-mono text-xs shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Mark as Resolved</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Toast alert banner */}
+        {toastMessage && (
+          <div className="px-4 py-2 bg-neutral-900 text-white text-xs font-mono flex items-center justify-between border-b border-neutral-800">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              {toastMessage}
+            </span>
+            <span className="text-[10px] text-neutral-400">Synced across real-time brokers</span>
+          </div>
+        )}
+
+        {/* Messages Scrollable Thread */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-neutral-50/50">
+          {/* Initial Ticket Description Box */}
+          <div className="p-4 bg-white border border-neutral-200 shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-neutral-900 text-white flex items-center justify-center font-bold text-xs">
+                  {ticket.customerName.charAt(0)}
                 </span>
-                <span
-                  className={`font-mono text-xs uppercase font-bold ${
-                    ticket.priority === 'urgent' ? 'text-red-600' : 'text-black'
+                <span className="text-xs font-bold text-black">{ticket.customerName}</span>
+                <span className="text-[11px] font-mono text-neutral-400">
+                  {ticket.customerEmail}
+                </span>
+              </div>
+              <span className="text-[11px] font-mono text-neutral-400">
+                {new Date(ticket.createdAt).toLocaleString()}
+              </span>
+            </div>
+
+            <p className="text-xs sm:text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">
+              {ticket.description}
+            </p>
+
+            {/* Proof Attachments */}
+            {ticket.attachments && ticket.attachments.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-neutral-100">
+                <div className="text-[10px] font-mono uppercase text-neutral-500 font-semibold mb-2">
+                  Original Attachments ({ticket.attachments.length}):
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {ticket.attachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="p-2 border border-neutral-200 bg-neutral-50 rounded flex items-center gap-2 text-xs"
+                    >
+                      {att.previewUrl ? (
+                        <img
+                          src={att.previewUrl}
+                          alt={att.name}
+                          className="w-10 h-10 object-cover rounded shrink-0 border border-neutral-200"
+                        />
+                      ) : (
+                        <Paperclip className="w-5 h-5 text-neutral-400 shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-medium text-neutral-800 truncate">
+                          {att.name}
+                        </div>
+                        <div className="text-[10px] font-mono text-neutral-400">{att.size}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Sequential Messages */}
+          {ticket.messages.map((msg) => {
+            const isCustomer = msg.senderRole === 'customer';
+            const isInternal = msg.isInternal;
+
+            // If message is internal and current user is NOT staff, hide it!
+            if (isInternal && !isStaff) {
+              return null;
+            }
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
+              >
+                <div className="flex items-center gap-2 mb-1 px-1">
+                  {!isCustomer && (
+                    <img
+                      src={msg.avatar || AVAILABLE_AGENTS[0].avatar}
+                      alt={msg.senderName}
+                      className="w-4 h-4 rounded-full object-cover"
+                    />
+                  )}
+                  <span className="text-xs font-bold text-neutral-800">{msg.senderName}</span>
+                  <span className="font-mono text-[10px] text-neutral-400">
+                    {new Date(msg.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  {isInternal && (
+                    <span className="text-[9px] font-mono font-bold bg-amber-200 text-amber-900 px-1 py-0.2 rounded uppercase flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Staff Only
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  className={`max-w-xl p-3.5 rounded text-xs sm:text-sm leading-relaxed whitespace-pre-wrap ${
+                    isInternal
+                      ? 'bg-amber-50 border border-amber-300 text-amber-950 font-mono text-xs'
+                      : isCustomer
+                      ? 'bg-black text-white shadow-xs'
+                      : 'bg-white border border-neutral-200 text-neutral-800 shadow-xs'
                   }`}
                 >
-                  {ticket.priority}
-                </span>
-              </div>
+                  {msg.content}
 
-              <div>
-                <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                  Category
-                </span>
-                <p className="text-xs font-medium text-black">{ticket.category}</p>
-              </div>
-
-              {ticket.orderNumber && (
-                <div>
-                  <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                    Linked Order
-                  </span>
-                  <p className="font-mono text-xs font-bold text-black">{ticket.orderNumber}</p>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mt-2.5 pt-2 border-t border-neutral-200/40 grid grid-cols-2 gap-2">
+                      {msg.attachments.map((att) => (
+                        <div
+                          key={att.id}
+                          className="p-1.5 border border-neutral-200 bg-white/10 rounded flex items-center gap-2 text-xs"
+                        >
+                          {att.previewUrl && (
+                            <img
+                              src={att.previewUrl}
+                              alt={att.name}
+                              className="w-8 h-8 object-cover rounded"
+                            />
+                          )}
+                          <span className="truncate text-[11px]">{att.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-
-              <div>
-                <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                  Customer
-                </span>
-                <p className="text-xs font-semibold text-black">{ticket.customerName}</p>
-                <p className="font-mono text-[11px] text-neutral-500">{ticket.customerEmail}</p>
               </div>
+            );
+          })}
 
-              <div>
-                <span className="font-mono text-[11px] uppercase text-neutral-400 block mb-1">
-                  Assigned Team Lead
-                </span>
-                <div className="flex items-center gap-2 mt-1">
-                  <img
-                    src={SUPPORT_AVATAR}
-                    alt="Alex Vance"
-                    className="w-7 h-7 rounded-full object-cover border border-neutral-200"
+          {/* Real-time Typing Indicator */}
+          {isAgentTyping && (
+            <div className="flex items-center gap-2 p-2 bg-neutral-100 rounded max-w-xs text-xs font-mono text-neutral-600 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-red-600" />
+              <span>{typingAgentName} is typing a response...</span>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Message Composer & Real-time simulation bar */}
+        <div className="p-4 border-t border-neutral-200 bg-white shrink-0 space-y-3">
+          {/* Quick simulation helper for tester */}
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              {isStaff && (
+                <label className="flex items-center gap-1.5 cursor-pointer font-mono text-xs text-amber-800 bg-amber-50 px-2 py-1 border border-amber-200 rounded">
+                  <input
+                    type="checkbox"
+                    checked={isInternalNote}
+                    onChange={(e) => setIsInternalNote(e.target.checked)}
+                    className="accent-amber-600"
                   />
-                  <div>
-                    <p className="text-xs font-semibold text-black">Alex Vance</p>
-                    <p className="text-[10px] text-neutral-500">Sanelow Care & Merch Lead</p>
-                  </div>
-                </div>
-              </div>
+                  <Lock className="w-3 h-3" />
+                  <span>Post as Internal Staff Note</span>
+                </label>
+              )}
+            </div>
 
-              {/* Email Notification Toggle Placeholder */}
-              <div className="pt-3 border-t border-neutral-100">
+            <button
+              type="button"
+              onClick={handleSimulateRealtimeAgentReply}
+              className="text-[11px] font-mono text-red-600 hover:text-red-700 flex items-center gap-1 font-semibold cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Simulate Real-Time Agent Reply</span>
+            </button>
+          </div>
+
+          {/* Pending Attachments preview */}
+          {replyAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {replyAttachments.map((att) => (
+                <div
+                  key={att.id}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-neutral-100 border border-neutral-200 text-xs font-mono rounded"
+                >
+                  <Paperclip className="w-3 h-3 text-neutral-500" />
+                  <span className="truncate max-w-[150px]">{att.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(att.id)}
+                    className="text-neutral-400 hover:text-red-600 cursor-pointer ml-1"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Reply Form */}
+          <form onSubmit={handleSend} className="flex gap-2">
+            <div className="flex-1 relative">
+              <textarea
+                rows={2}
+                value={replyContent}
+                onChange={(e) => setReplyContent(e.target.value)}
+                placeholder={
+                  isInternalNote
+                    ? 'Write an internal staff note (visible only to agents and admins)...'
+                    : `Write a response as ${user.name}...`
+                }
+                className={`w-full p-2.5 text-xs sm:text-sm border focus:outline-none resize-none transition-colors ${
+                  isInternalNote
+                    ? 'border-amber-400 bg-amber-50/50 focus:border-amber-600'
+                    : 'border-neutral-300 focus:border-red-600 bg-white'
+                }`}
+              />
+
+              <div className="absolute right-2 bottom-2.5 flex items-center gap-1">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  multiple
+                  className="hidden"
+                />
                 <button
                   type="button"
-                  onClick={() => onToggleEmailNotifications(ticket.id)}
-                  className="cursor-pointer w-full text-left flex items-start gap-2 p-2.5 border border-neutral-200 hover:border-neutral-300 transition-colors bg-neutral-50"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="p-1.5 text-neutral-400 hover:text-black rounded transition-colors cursor-pointer"
+                  title="Attach file or photo proof"
                 >
-                  {ticket.emailNotificationEnabled ? (
-                    <Bell className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <BellOff className="w-4 h-4 text-neutral-400 shrink-0 mt-0.5" />
-                  )}
-                  <div>
-                    <p className="text-xs font-bold text-black">
-                      {ticket.emailNotificationEnabled ? 'Email Alerts Active' : 'Email Alerts Muted'}
-                    </p>
-                    <p className="text-[11px] text-neutral-500">
-                      Dispatches immediate emails to {ticket.customerEmail} when staff responds.
-                    </p>
-                  </div>
+                  <Paperclip className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Bottom Actions */}
-            <div className="pt-5 mt-5 border-t border-neutral-200 space-y-2">
-              {/* Simulate Staff Reply Button */}
-              <button
-                type="button"
-                onClick={handleSimulateStaff}
-                disabled={isSimulatingAgent}
-                className="cursor-pointer w-full px-3 py-2 text-xs font-semibold text-neutral-800 bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-red-600" />
-                <span>Simulate Staff Reply</span>
-              </button>
-
-              {/* Resolve / Reopen */}
-              <button
-                type="button"
-                onClick={handleToggleResolve}
-                className={`cursor-pointer w-full px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 border ${
-                  ticket.status === 'resolved'
-                    ? 'border-neutral-300 text-black bg-white hover:bg-neutral-100'
-                    : 'border-black text-white bg-black hover:bg-neutral-900'
-                }`}
-              >
-                {ticket.status === 'resolved' ? (
-                  <>
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reopen Ticket</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-red-500" />
-                    <span>Mark as Resolved</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+            <button
+              type="submit"
+              disabled={!replyContent.trim() && replyAttachments.length === 0}
+              className={`px-5 py-2 text-white font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-xs ${
+                isInternalNote
+                  ? 'bg-amber-600 hover:bg-amber-700'
+                  : 'bg-red-600 hover:bg-red-700'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Send</span>
+            </button>
+          </form>
         </div>
       </div>
     </div>

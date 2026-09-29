@@ -44,7 +44,7 @@ export const CreateTicketForm: React.FC<CreateTicketFormProps> = ({
   const [category, setCategory] = useState<TicketCategory>(
     prefillCategory || 'Damaged / Misprinted Item'
   );
-  const [priority, setPriority] = useState<TicketPriority>('normal');
+  const [priority, setPriority] = useState<TicketPriority>('medium');
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
 
@@ -154,7 +154,7 @@ export const CreateTicketForm: React.FC<CreateTicketFormProps> = ({
       description,
       category,
       priority,
-      status: 'pending_agent',
+      status: 'open',
       customerName: fullName,
       customerEmail: email,
       orderNumber: effectiveOrder || undefined,
@@ -454,7 +454,7 @@ export const CreateTicketForm: React.FC<CreateTicketFormProps> = ({
             Priority Level
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(['low', 'normal', 'high', 'urgent'] as TicketPriority[]).map((lvl) => {
+            {(['low', 'medium', 'high', 'urgent'] as TicketPriority[]).map((lvl) => {
               const isUrgent = lvl === 'urgent';
               const isSelected = priority === lvl;
               return (
